@@ -110,7 +110,7 @@ fit_interaction2 %>%
 ```{r}
 nyc_airbnb %>% 
     filter(boro == "Brooklyn") %>% 
-    lm(price~stars+room_type,data = nyc_airbnb) %>% 
+    lm(price~stars+room_type) %>% 
     broom::tidy()
 ```
 
