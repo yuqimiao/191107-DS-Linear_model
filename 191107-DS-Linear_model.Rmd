@@ -1,0 +1,179 @@
+---
+title: '191107'
+author: "Yuqi Miao"
+date: "11/7/2019"
+output: html_document
+---
+```{r}
+library(tidyverse)
+library(p8105.datasets)
+set.seed(1)
+
+```
+
+# data manipulation
+
+```{r}
+data("nyc_airbnb")
+nyc_airbnb = 
+  nyc_airbnb %>% 
+  mutate(stars = review_scores_location / 2) %>% 
+  rename(
+    boro = neighbourhood_group,
+    neighborhood = neighbourhood) %>% 
+  filter(boro != "Staten Island") %>% 
+  select(price, stars, boro, neighborhood, room_type)
+
+```
+
+
+# Fit a first model
+```{r}
+fit = lm(price~stars+boro, data = nyc_airbnb)
+```
+
+```{r}
+fit ## the categoriacal variables are considered as different varibles? -- making different bicategorical variables {0,1}.
+table(nyc_airbnb$boro)
+
+summary(fit)
+
+```
+
+## tidy the results instead
+
+```{r}
+fit %>% 
+    broom::tidy() %>% 
+    mutate(term = str_replace(term, "boro","Boro:")) %>% ## change names
+    knitr::kable(digits =3 )
+
+```
+
+# Take a look at the factors
+```{r}
+nyc_airbnb =
+    nyc_airbnb %>% 
+    mutate(
+        boro = fct_infreq(boro), # fct_infreq(): rank by frequency
+        room_type = fct_infreq(room_type)
+    )
+```
+
+## refit
+```{r}
+fit = lm(price~stars+boro, data =nyc_airbnb)
+fit %>% 
+    broom::tidy()
+
+## boro: 以Manhattan为reference，地区变化按照频率rank，Manhattan第一作为参考，其余的三个变量，以出现频率为赋值标准，频率越接近Manhattan，为2，3，4
+```
+
+
+
+
+
+## diagnostic: modelr
+
+```{r}
+
+modelr::add_residuals(nyc_airbnb,fit) %>% 
+    ggplot(aes(x = boro,y = resid))+
+    geom_violin()+
+    ylim(-500,500)
+
+
+modelr::add_residuals(nyc_airbnb,fit) %>% 
+    ggplot(aes(x = stars,y = resid))+
+    geom_point()+
+    ylim(-500,500)
+
+modelr::add_predictions(nyc_airbnb,fit)
+```
+
+# interaction
+
+```{r}
+fit_interaction = lm(price~stars*boro,data = nyc_airbnb) ## see interaction between stars and boros
+fit_interaction %>% 
+    broom::tidy()
+```
+```{r}
+fit_interaction2 = lm(price~stars*boro*room_type,data = nyc_airbnb) ## see interaction between stars and boros
+fit_interaction2 %>% 
+    broom::tidy()
+
+## interprete as reference
+```
+
+# nesting 
+```{r}
+nyc_airbnb %>% 
+    filter(boro == "Brooklyn") %>% 
+    lm(price~stars+room_type,data = nyc_airbnb) %>% 
+    broom::tidy()
+```
+
+## map this
+
+```{r}
+## nest in terms of boro.
+nest_lm <- 
+    nyc_airbnb %>% 
+    nest(data = -boro) %>% ## 先用nest把相关数据分类 
+    mutate(
+        models = map(.x = data, ~lm(price~stars+room_type,data = .x)), ## fit model in different boros
+        results = map(models, broom::tidy)
+    ) %>% 
+    select(boro,results) %>% 
+    unnest(results)
+
+table(nyc_airbnb$room_type)
+```
+
+```{r}
+## nest in terms of boro.
+manhattan_nest_ls_res <- 
+    nyc_airbnb %>% 
+    filter(boro == "Manhattan") %>% 
+    nest(data = -neighborhood) %>% ## 先用nest把相关数据分类 
+    mutate(
+        models = map(.x = data, ~lm(price~stars+room_type,data = .x)), ## fit model in different boros
+        results = map(models, broom::tidy)
+    ) %>% 
+    select(neighborhood,results) %>% 
+    unnest(results)
+
+
+manhattan_nest_ls_res %>% 
+    filter(str_detect(term, "room_type")) %>% ## 筛选包含某一字符的列
+    ggplot(aes(x = neighborhood, y = estimate)) + 
+    geom_point() + 
+    facet_wrap(~term) + 
+    theme(axis.text.x = element_text(angle = 80, hjust = 1))
+
+```
+
+
+# GLM example
+```{r}
+
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
