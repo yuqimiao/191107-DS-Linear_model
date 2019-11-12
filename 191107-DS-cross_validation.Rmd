@@ -1,0 +1,192 @@
+---
+title: "cross-validation"
+author: "Yuqi Miao"
+date: "11/12/2019"
+output: html_document
+---
+
+# slides
+
+## Model selection is hard
+
+Lots of times you’re not in the best case, but still have to do something This isn’t an easy thing to do
+
+* For nested models, you have tests
+
+– You have to be worried about multiple comparisons and “fishing”
+
+* For non-nested models, you don’t have tests
+– AIC / BIC / etc are traditional tools 
+    * IC : information critieria, telling the goodness of models to different data; 
+    * Balance goodness of fit with “complexity”
+    
+## Questioning fit
+
+* These are basically the same question:
+
+– Is my model not complex enough? Too complex? – Am I underfitting? Overfitting?
+
+– Do I have high bias? High variance?
+
+* Another way to think of this is out-of-sample goodness of fit:
+
+– Will my model `generalize` to future datasets?
+
+## cross validation
+
+* randomly assigned the data into training/test dataset( usualy ratio is `80/20`)
+* result is RMSE for prediction in test group
+
+##?? why no fold?
+
+## Comes up a lot in “modern” methods
+– Automated variable selection `(e.g. lasso)` 
+– Additive models
+– Regression trees
+
+```{r}
+library(tidyverse)
+library(modelr)
+library(mgcv)
+```
+
+# CV by hand
+
+```{r}
+set.seed(1)
+nonlin_df = 
+  tibble(
+    id = 1:100,
+    x = runif(100, 0, 1),
+    y = 1 - 10 * (x - .3) ^ 2 + rnorm(100, 0, .3)
+  )
+
+nonlin_df %>% 
+  ggplot(aes(x = x, y = y)) + 
+  geom_point() + theme_bw()
+```
+
+## split data using `anti_join`
+
+```{r}
+train_df = sample_frac(nonlin_df, size = 0.8) ## first sample training dataset
+test_df = anti_join(nonlin_df, train_df, by = "id") # then use anti_join() to get test datset
+
+ggplot(train_df, aes(x = x, y = y)) + 
+  geom_point() + 
+  geom_point(data = test_df, color = "red")
+```
+
+# Fit 3 models of varying goodness
+
+```{r}
+linear_mod = lm(y ~ x, data = train_df)
+smooth_mod = mgcv::gam(y ~ s(x), data = train_df) ##use mgcv::gam for non-linear models
+wiggly_mod = mgcv::gam(y ~ s(x, k = 30), sp = 10e-6, data = train_df)
+```
+
+```{r}
+train_df %>% 
+  add_predictions(wiggly_mod) %>% ## from modelr package, can add predictions from models to the dataset directly
+  ggplot(aes(x = x, y = y)) + geom_point() + 
+  geom_line(aes(y = pred), color = "red")
+```
+
+```{r}
+train_df %>% 
+  gather_predictions(linear_mod, smooth_mod, wiggly_mod) %>% ## gather together predictions results
+  mutate(model = fct_inorder(model)) %>% 
+  ggplot(aes(x = x, y = y)) + 
+  geom_point() + 
+  geom_line(aes(y = pred), color = "red") + 
+  facet_wrap(~model)
+```
+
+## test results
+
+```{r}
+rmse(linear_mod, test_df)
+rmse(smooth_mod,test_df)
+rmse(wiggly_mod,test_df)
+
+rmse(wiggly_mod,train_df)
+rmse(smooth_mod,train_df)
+```
+
+
+* Choose the prediction score relatively instead of focusing on the absolute value.
+* wiggly_mod is overfitting to the training dataset, not perform as well as smooth to predict.
+* when the variables ammount is large, there is a trend to overfit; But wiggly is useful to select relative important variables.
+
+## ??? wiggly model
+
+# Using modelr to CV
+
+```{r}
+cv_df =
+    crossv_mc(nonlin_df,100) ## create 100 pair of train and test datasets
+```
+
+## note about resample
+```{r}
+cv_df %>% pull(train) %>% .[[8]] %>% as_tibble
+# it saves the data once and stores the indexes for each training / testing split using a resample object, resample just give the row index, need to use as_tibble to make it a dataset
+
+cv_df =
+  cv_df %>% 
+  mutate(
+    train = map(train, as_tibble),
+    test = map(test, as_tibble))
+
+```
+
+
+## using `mutate + map & map2` to fit the model and predict
+
+```{r}
+cv_df = 
+  cv_df %>% 
+  mutate(linear_mod  = map(train, ~lm(y ~ x, data = .x)),
+         smooth_mod  = map(train, ~mgcv::gam(y ~ s(x), data = .x)),
+         wiggly_mod  = map(train, ~gam(y ~ s(x, k = 30), sp = 10e-6, data = .x))) %>% 
+  mutate(rmse_linear = map2_dbl(linear_mod, test, ~rmse(model = .x, data = .y)),
+         rmse_smooth = map2_dbl(smooth_mod, test, ~rmse(model = .x, data = .y)),
+         rmse_wiggly = map2_dbl(wiggly_mod, test, ~rmse(model = .x, data = .y)))
+```
+
+
+```{r}
+cv_df %>% 
+  select(starts_with("rmse")) %>% 
+  pivot_longer(
+    everything(),
+    names_to = "model", 
+    values_to = "rmse",
+    names_prefix = "rmse_") %>% 
+  mutate(model = fct_inorder(model,rmse)) %>% 
+  ggplot(aes(x = model, y = rmse)) + geom_violin()
+```
+
+```{r}
+child_growth = read_csv("nepalese_children.csv")
+
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
