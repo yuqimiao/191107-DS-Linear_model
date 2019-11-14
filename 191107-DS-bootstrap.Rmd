@@ -1,0 +1,224 @@
+---
+title: "bootstrap"
+author: "Yuqi Miao"
+date: "11/14/2019"
+output: html_document
+---
+# slides
+1. bootstrap
+
+Idea is to mimic repeated sampling with the one sample you have
+
+Your sample is draw at random from your population
+
+– You’d like to draw more samples, but you can’t
+– So you draw a bootstrap sample from the one sample you have
+– The bootstrap sample has the same size as the original sample, and is
+drawn with replacement
+– Analyze this sample using whatever approach you want to apply
+– Repeat
+
+```{r}
+library(tidyverse)
+library(modelr)
+library(broom)
+library(p8105.datasets)
+set.seed(1)
+```
+
+```{r}
+n_samp = 250
+
+sim_df_const = 
+  tibble(
+    x = rnorm(n_samp, 1, 1),
+    error = rnorm(n_samp, 0, 1),
+    y = 2 + 3 * x + error
+  )
+
+sim_df_nonconst = sim_df_const %>% 
+  mutate(
+  error = error * .75 * x,
+  y = 2 + 3 * x + error
+)
+
+```
+
+```{r}
+sim_df = 
+  bind_rows(const = sim_df_const, nonconst = sim_df_nonconst, .id = "data_source") ## 加ID！
+
+sim_df %>% 
+  ggplot(aes(x = x, y = y)) + 
+  geom_point(alpha = .5) +
+  stat_smooth(method = "lm") +
+  facet_grid(~data_source) 
+```
+
+
+## fit 2 model
+
+```{r}
+sim_df_const %>% 
+    lm(y~x,data =.) %>% 
+    broom::tidy()
+sim_df_nonconst %>% 
+    lm(y~x,data =.) %>% 
+    broom::tidy()
+# non_const a little bigger than const?
+```
+
+## bootstrap
+write a function to draw a bootstrap sample based on a data frame
+
+resample:
+
+```{r}
+sim_df_const %>% 
+    sample_frac(size=1,replace = FALSE) %>% 
+    arrange(x)
+
+## bootstrap
+sim_df_nonconst %>% 
+    sample_frac(size=1,replace = TRUE) %>% 
+    arrange(x)
+```
+
+```{r}
+boot_sample = function(df) {
+  sample_frac(df, replace = TRUE)
+}
+
+boot_sample(sim_df_nonconst) %>% 
+  ggplot(aes(x = x, y = y)) + 
+  geom_point(alpha = .5) +
+  stat_smooth(method = "lm")
+```
+
+
+## organize a dataframe
+
+```{r}
+boot_straps = tibble(
+    strap_number = 1:1000,
+    strap_sample = rerun(1000,boot_sample(df = sim_df_nonconst))
+)
+
+## replace sample 1000 times
+```
+
+Do some kind of analysis
+
+```{r}
+bootstraps_results = boot_straps %>% 
+    mutate(
+        models = map(strap_sample,~lm(y~x,data = .x)),
+        results = map(models, broom::tidy)
+    ) %>% 
+    select(-strap_sample,-models) %>% 
+    unnest()
+
+```
+
+## summarise the results
+
+```{r}
+bootstraps_results %>% 
+    group_by(term) %>% 
+    summarise(se = sd(estimate))
+```
+
+
+
+## try modelr package
+
+
+one step to finish the replacement sampling
+
+```{r}
+boot_straps = 
+    sim_df_nonconst %>% 
+    modelr::bootstrap(1000)
+    
+```
+
+## What if your assumptions are wrong?
+
+```{r}
+sim_df_const %>% 
+    lm(y~x, data =.) %>% 
+    broom::tidy()
+
+sim_df_const %>% 
+  modelr::bootstrap(n = 1000) %>% 
+  mutate(models = map(strap, ~lm(y ~ x, data = .x) ),
+         results = map(models, broom::tidy)) %>% 
+  select(-strap, -models) %>% 
+  unnest(results) %>% 
+  group_by(term) %>% 
+  summarize(boot_se = sd(estimate))
+
+```
+
+reusable model chunk
+
+```{r}
+sim_df_const %>% 
+  modelr::bootstrap(n = 1000) %>% 
+  mutate(models = map(strap, ~lm(y ~ x, data = .x) ),
+         results = map(models, broom::tidy)) %>% 
+  select(-strap, -models) %>% 
+  unnest(results) %>% 
+  group_by(term) %>% 
+  summarize(boot_se = sd(estimate))
+```
+
+
+## boot_strap?? size = 1
+
+
+```{r}
+data("nyc_airbnb")
+
+nyc_airbnb = 
+  nyc_airbnb %>% 
+  mutate(stars = review_scores_location / 2) %>% 
+  rename(
+    boro = neighbourhood_group,
+    neighborhood = neighbourhood) %>% 
+  filter(boro != "Staten Island") %>% 
+  select(price, stars, boro, neighborhood, room_type)
+```
+
+
+
+```{r}
+nyc_airbnb %>% 
+  ggplot(aes(x = stars, y = price, color = room_type)) + 
+  geom_point() 
+```
+
+
+```{r}
+nyc_airbnb %>% 
+  filter(boro == "Manhattan") %>% 
+  modelr::bootstrap(n = 1000) %>% 
+  mutate(
+    models = map(strap, ~ lm(price ~ stars + room_type, data = .x)),
+    results = map(models, broom::tidy)) %>% 
+  select(results) %>% 
+  unnest(results) %>% 
+  filter(term == "stars") %>% 
+  ggplot(aes(x = estimate)) + geom_density()
+```
+
+本质上，Bootstrap方法，是将一次的估计过程，重复上千次上万次，从而便得到了得到上千个甚至上万个的估计值，于是利用这不止一个的估计值，我们就可以估计[公式]均值以外的其他统计量：比如标准差、中位数等
+
+confidence interval:
+
+
+
+
+
+
+
